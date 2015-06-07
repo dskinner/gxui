@@ -6,9 +6,10 @@ package mixins
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/google/gxui"
 	"github.com/google/gxui/math"
-	"strings"
 )
 
 type CodeEditorOuter interface {
@@ -192,7 +193,7 @@ func (t *CodeEditor) KeyPress(ev gxui.KeyboardEvent) (consume bool) {
 		if t.IsSuggestionListShowing() {
 			text := t.suggestionAdapter.Suggestion(t.suggestionList.Selected()).Code()
 			s, e := controller.WordAt(t.controller.LastCaret())
-			controller.SetSelection(gxui.CreateTextSelection(s, e, false))
+			controller.SetSelection(gxui.CreateTextCursor(s, e))
 			controller.ReplaceAll(text)
 			controller.Deselect(false)
 			t.HideSuggestionList()

@@ -5,11 +5,12 @@
 package gxui
 
 import (
-	"github.com/google/gxui/interval"
-	"github.com/google/gxui/math"
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/google/gxui/interval"
+	"github.com/google/gxui/math"
 )
 
 type TextBoxEdit struct {
@@ -23,7 +24,7 @@ type TextBoxController struct {
 	text                        []rune
 	lineStarts                  []int
 	lineEnds                    []int
-	selections                  TextSelectionList
+	selections                  TextCursorList
 	locationHistory             [][]int
 	locationHistoryIndex        int
 	storeCaretLocationsNextEdit bool
@@ -34,7 +35,7 @@ func CreateTextBoxController() *TextBoxController {
 		onSelectionChanged: CreateEvent(func() {}),
 		onTextChanged:      CreateEvent(func([]TextBoxEdit) {}),
 	}
-	t.selections = TextSelectionList{TextSelection{}}
+	t.selections = TextCursorList{TextCursor{}}
 	return t
 }
 
@@ -46,24 +47,31 @@ func (t *TextBoxController) textEdited(edits []TextBoxEdit) {
 func (t *TextBoxController) updateSelectionsForEdits(edits []TextBoxEdit) {
 	min := 0
 	max := len(t.text)
-	selections := TextSelectionList{}
-	for _, selection := range t.selections {
+	selections := TextCursorList{}
+	for _, cursor := range t.selections {
+		start, end := cursor.Range()
 		for _, e := range edits {
 			at := e.At
 			delta := e.Delta
-			if selection.start > at {
-				selection.start += delta
+			if start > at {
+				start += delta
 			}
-			if selection.end >= at {
-				selection.end += delta
+			if end >= at {
+				end += delta
 			}
 		}
-		if selection.end < selection.start {
-			selection.end = selection.start
+		if end < start {
+			end = start
 		}
-		selection.start = math.Clamp(selection.start, min, max)
-		selection.end = math.Clamp(selection.end, min, max)
-		interval.Merge(&selections, selection)
+
+		start = math.Clamp(start, min, max)
+		end = math.Clamp(end, min, max)
+
+		if cursor.Length > 0 {
+			interval.Merge(&selections, CreateTextCursor(end, start))
+		} else {
+			interval.Merge(&selections, CreateTextCursor(start, end))
+		}
 	}
 	t.selections = selections
 }
@@ -110,35 +118,35 @@ func (t *TextBoxController) SelectionCount() int {
 	return len(t.selections)
 }
 
-func (t *TextBoxController) Selection(i int) TextSelection {
+func (t *TextBoxController) Selection(i int) TextCursor {
 	return t.selections[i]
 }
 
-func (t *TextBoxController) Selections() TextSelectionList {
-	return append(TextSelectionList{}, t.selections...)
+func (t *TextBoxController) Selections() TextCursorList {
+	return append(TextCursorList{}, t.selections...)
 }
 
 func (t *TextBoxController) SelectionText(i int) string {
-	sel := t.selections[i]
-	runes := t.text[sel.start:sel.end]
+	start, end := t.selections[i].Range()
+	runes := t.text[start:end]
 	return RuneArrayToString(runes)
 }
 
 func (t *TextBoxController) SelectionLineText(i int) string {
-	sel := t.selections[i]
-	line := t.LineIndex(sel.start)
+	start, _ := t.selections[i].Range()
+	line := t.LineIndex(start)
 	runes := t.text[t.LineStart(line):t.LineEnd(line)]
 	return RuneArrayToString(runes)
 }
 
 func (t *TextBoxController) Caret(i int) int {
-	return t.selections[i].Caret()
+	return t.selections[i].Index
 }
 
 func (t *TextBoxController) Carets() []int {
 	l := make([]int, len(t.selections))
 	for i, s := range t.selections {
-		l[i] = s.Caret()
+		l[i] = s.Index
 	}
 	return l
 }
@@ -151,11 +159,11 @@ func (t *TextBoxController) LastCaret() int {
 	return t.Caret(t.SelectionCount() - 1)
 }
 
-func (t *TextBoxController) FirstSelection() TextSelection {
+func (t *TextBoxController) FirstSelection() TextCursor {
 	return t.Selection(0)
 }
 
-func (t *TextBoxController) LastSelection() TextSelection {
+func (t *TextBoxController) LastSelection() TextCursor {
 	return t.Selection(t.SelectionCount() - 1)
 }
 
@@ -322,28 +330,28 @@ func (t *TextBoxController) ClearSelections() {
 
 func (t *TextBoxController) SetCaret(c int) {
 	t.storeCaretLocationsNextEdit = true
-	t.selections = TextSelectionList{}
+	t.selections = TextCursorList{}
 	t.AddCaret(c)
 }
 
 func (t *TextBoxController) AddCaret(c int) {
 	t.storeCaretLocationsNextEdit = true
-	t.AddSelection(TextSelection{c, c, false})
+	t.AddSelection(TextCursor{Index: c})
 }
 
-func (t *TextBoxController) AddSelection(s TextSelection) {
+func (t *TextBoxController) AddSelection(s TextCursor) {
 	t.storeCaretLocationsNextEdit = true
 	interval.Merge(&t.selections, s)
 	t.onSelectionChanged.Fire()
 }
 
-func (t *TextBoxController) SetSelection(s TextSelection) {
+func (t *TextBoxController) SetSelection(s TextCursor) {
 	t.storeCaretLocationsNextEdit = true
-	t.selections = []TextSelection{s}
+	t.selections = []TextCursor{s}
 	t.onSelectionChanged.Fire()
 }
 
-func (t *TextBoxController) SetSelections(s TextSelectionList) {
+func (t *TextBoxController) SetSelections(s TextCursorList) {
 	t.storeCaretLocationsNextEdit = true
 	t.selections = s
 	if len(s) == 0 {
@@ -355,7 +363,7 @@ func (t *TextBoxController) SetSelections(s TextSelectionList) {
 
 func (t *TextBoxController) SelectAll() {
 	t.storeCaretLocationsNextEdit = true
-	t.SetSelection(TextSelection{0, len(t.text), false})
+	t.SetSelection(TextCursor{Index: len(t.text), Length: -len(t.text)})
 }
 
 func (t *TextBoxController) RestorePreviousSelections() {
@@ -366,9 +374,9 @@ func (t *TextBoxController) RestorePreviousSelections() {
 	if t.locationHistoryIndex > 0 {
 		t.locationHistoryIndex--
 		locations := t.locationHistory[t.locationHistoryIndex]
-		t.selections = make(TextSelectionList, len(locations))
+		t.selections = make(TextCursorList, len(locations))
 		for i, l := range locations {
-			t.selections[i] = TextSelection{l, l, false}
+			t.selections[i] = TextCursor{Index: l}
 		}
 		t.onSelectionChanged.Fire()
 	}
@@ -378,9 +386,9 @@ func (t *TextBoxController) RestoreNextSelections() {
 	if t.locationHistoryIndex < len(t.locationHistory)-1 {
 		t.locationHistoryIndex++
 		locations := t.locationHistory[t.locationHistoryIndex]
-		t.selections = make(TextSelectionList, len(locations))
+		t.selections = make(TextCursorList, len(locations))
 		for i, l := range locations {
-			t.selections[i] = TextSelection{l, l, false}
+			t.selections[i] = TextCursor{Index: l}
 		}
 		t.onSelectionChanged.Fire()
 	}
@@ -397,7 +405,7 @@ func (t *TextBoxController) AddCarets(transform SelectionTransform) {
 
 func (t *TextBoxController) GrowSelections(transform SelectionTransform) {
 	t.storeCaretLocationsNextEdit = true
-	t.selections = t.selections.TransformCarets(0, transform)
+	t.selections = t.selections.TransformRange(0, transform)
 	t.onSelectionChanged.Fire()
 }
 
@@ -436,17 +444,18 @@ func (t *TextBoxController) Delete() {
 	edits := []TextBoxEdit{}
 	for i := len(t.selections) - 1; i >= 0; i-- {
 		s := t.selections[i]
-		if s.start == s.end && s.end < len(t.text) {
-			copy(text[s.start:], text[s.start+1:])
+		start, end := s.Range()
+		if start == end && end < len(t.text) {
+			copy(text[start:], text[start+1:])
 			text = text[:len(text)-1]
-			edits = append(edits, TextBoxEdit{s.start, -1})
+			edits = append(edits, TextBoxEdit{start, -1})
 		} else {
-			copy(text[s.start:], text[s.end:])
-			l := s.Length()
+			copy(text[start:], text[end:])
+			l := end - start
 			text = text[:len(text)-l]
-			edits = append(edits, TextBoxEdit{s.start, -l})
+			edits = append(edits, TextBoxEdit{start, -l})
 		}
-		t.selections[i] = TextSelection{s.end, s.end, false}
+		t.selections[i] = TextCursor{Index: end}
 	}
 	t.SetTextEdits(text, edits)
 }
@@ -457,39 +466,41 @@ func (t *TextBoxController) Backspace() {
 	edits := []TextBoxEdit{}
 	for i := len(t.selections) - 1; i >= 0; i-- {
 		s := t.selections[i]
-		if s.start == s.end && s.start > 0 {
-			copy(text[s.start-1:], text[s.start:])
+		start, end := s.Range()
+		if start == end && start > 0 {
+			copy(text[start-1:], text[start:])
 			text = text[:len(text)-1]
-			edits = append(edits, TextBoxEdit{s.start - 1, -1})
+			edits = append(edits, TextBoxEdit{start - 1, -1})
 		} else {
-			copy(text[s.start:], text[s.end:])
-			l := s.Length()
+			copy(text[start:], text[end:])
+			l := end - start
 			text = text[:len(text)-l]
-			edits = append(edits, TextBoxEdit{s.start - 1, -l})
+			edits = append(edits, TextBoxEdit{start - 1, -l})
 		}
-		t.selections[i] = TextSelection{s.end, s.end, false}
+		t.selections[i] = TextCursor{Index: end}
 	}
 	t.SetTextEdits(text, edits)
 }
 
 func (t *TextBoxController) ReplaceAll(str string) {
-	t.Replace(func(TextSelection) string { return str })
+	t.Replace(func(TextCursor) string { return str })
 }
 
 func (t *TextBoxController) ReplaceAllRunes(str []rune) {
-	t.ReplaceRunes(func(TextSelection) []rune { return str })
+	t.ReplaceRunes(func(TextCursor) []rune { return str })
 }
 
-func (t *TextBoxController) Replace(f func(sel TextSelection) string) {
-	t.ReplaceRunes(func(s TextSelection) []rune { return StringToRuneArray(f(s)) })
+func (t *TextBoxController) Replace(f func(sel TextCursor) string) {
+	t.ReplaceRunes(func(s TextCursor) []rune { return StringToRuneArray(f(s)) })
 }
 
-func (t *TextBoxController) ReplaceRunes(f func(sel TextSelection) []rune) {
+func (t *TextBoxController) ReplaceRunes(f func(sel TextCursor) []rune) {
 	t.maybeStoreCaretLocations()
 	text, edit, edits := t.text, TextBoxEdit{}, []TextBoxEdit{}
 	for i := len(t.selections) - 1; i >= 0; i-- {
 		s := t.selections[i]
-		text, edit = t.ReplaceAt(text, s.start, s.end, f(s))
+		start, end := s.Range()
+		text, edit = t.ReplaceAt(text, start, end, f(s))
 		edits = append(edits, edit)
 	}
 	t.setTextRunesNoEvent(text)
@@ -516,7 +527,7 @@ func (t *TextBoxController) ReplaceWithNewline() {
 }
 
 func (t *TextBoxController) ReplaceWithNewlineKeepIndent() {
-	t.Replace(func(sel TextSelection) string {
+	t.Replace(func(sel TextCursor) string {
 		s, _ := sel.Range()
 		indent := t.LineIndent(t.LineIndex(s))
 		return "\n" + strings.Repeat(" ", indent)
@@ -533,7 +544,8 @@ func (t *TextBoxController) IndentSelection(tabWidth int) {
 	lastLine := -1
 	for i := len(t.selections) - 1; i >= 0; i-- {
 		s := t.selections[i]
-		lis, lie := t.LineIndex(s.start), t.LineIndex(s.end)
+		start, end := s.Range()
+		lis, lie := t.LineIndex(start), t.LineIndex(end)
 		if lastLine == lie {
 			lie--
 		}
@@ -552,7 +564,8 @@ func (t *TextBoxController) UnindentSelection(tabWidth int) {
 	lastLine := -1
 	for i := len(t.selections) - 1; i >= 0; i-- {
 		s := t.selections[i]
-		lis, lie := t.LineIndex(s.start), t.LineIndex(s.end)
+		start, end := s.Range()
+		lis, lie := t.LineIndex(start), t.LineIndex(end)
 		if lastLine == lie {
 			lie--
 		}
@@ -593,14 +606,15 @@ func (t *TextBoxController) WordAt(runeIdx int) (s, e int) {
 func (t *TextBoxController) Deselect(moveCaretToStart bool) (deselected bool) {
 	deselected = false
 	for i, s := range t.selections {
-		if s.start == s.end {
+		if s.Length == 0 {
 			continue
 		}
 		deselected = true
+		start, end := s.Range()
 		if moveCaretToStart {
-			s.end = s.start
+			s = TextCursor{Index: start}
 		} else {
-			s.start = s.end
+			s = TextCursor{Index: end}
 		}
 		t.selections[i] = s
 	}

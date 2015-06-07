@@ -25,7 +25,7 @@ type TextBox interface {
 	SetDesiredWidth(desiredWidth int)
 	TextColor() Color
 	SetTextColor(Color)
-	Select(TextSelectionList)
+	Select(TextCursorList)
 	SelectAll()
 	Carets() []int
 	RuneIndexAt(p math.Point) (idx int, found bool)

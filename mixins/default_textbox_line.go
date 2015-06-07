@@ -110,7 +110,7 @@ func (t *DefaultTextBoxLine) PaintSelections(c gxui.Canvas) {
 	if t.textbox.selectionDragging {
 		interval.Replace(&selections, t.textbox.selectionDrag)
 	}
-	interval.Visit(&selections, gxui.CreateTextSelection(ls, le, false), func(s, e uint64, _ int) {
+	interval.Visit(&selections, gxui.CreateTextCursor(ls, le), func(s, e uint64, _ int) {
 		if s < e {
 			x := t.outer.MeasureRunes(ls, int(s)).W
 			m := t.outer.MeasureRunes(int(s), int(e))

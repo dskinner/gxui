@@ -5,10 +5,11 @@
 package mixins
 
 import (
+	"strings"
+
 	"github.com/google/gxui"
 	"github.com/google/gxui/math"
 	"github.com/google/gxui/mixins/parts"
-	"strings"
 )
 
 type TextBoxLine interface {
@@ -36,7 +37,7 @@ type TextBox struct {
 	controller        *gxui.TextBoxController
 	adapter           *TextBoxAdapter
 	selectionDragging bool
-	selectionDrag     gxui.TextSelection
+	selectionDrag     gxui.TextCursor
 	desiredWidth      int
 }
 
@@ -44,7 +45,7 @@ func (t *TextBox) lineMouseDown(line TextBoxLine, ev gxui.MouseEvent) {
 	if ev.Button == gxui.MouseButtonLeft {
 		p := line.RuneIndexAt(ev.Point)
 		t.selectionDragging = true
-		t.selectionDrag = gxui.CreateTextSelection(p, p, false)
+		t.selectionDrag = gxui.TextCursor{Index: p}
 		if !ev.Modifier.Control() {
 			t.controller.SetCaret(p)
 		}
@@ -165,12 +166,14 @@ func (t *TextBox) SetDesiredWidth(desiredWidth int) {
 	}
 }
 
-func (t *TextBox) Select(sel gxui.TextSelectionList) {
+func (t *TextBox) Select(sel gxui.TextCursorList) {
 	t.controller.StoreCaretLocations()
 	t.controller.SetSelections(sel)
 	// Use two scroll tos to try and display all selections (if it fits on screen)
-	t.ScrollToRune(t.controller.FirstSelection().First())
-	t.ScrollToRune(t.controller.LastSelection().Last())
+	firstStart, _ := t.controller.FirstSelection().Range()
+	_, lastEnd := t.controller.LastSelection().Range()
+	t.ScrollToRune(firstStart)
+	t.ScrollToRune(lastEnd - 1)
 }
 
 func (t *TextBox) SelectAll() {
@@ -407,11 +410,11 @@ func (t *TextBox) Click(ev gxui.MouseEvent) (consume bool) {
 
 func (t *TextBox) DoubleClick(ev gxui.MouseEvent) (consume bool) {
 	if p, ok := t.RuneIndexAt(ev.Point); ok {
-		s, e := t.controller.WordAt(p)
+		c := gxui.CreateTextCursor(t.controller.WordAt(p))
 		if ev.Modifier&gxui.ModControl != 0 {
-			t.controller.AddSelection(gxui.CreateTextSelection(s, e, false))
+			t.controller.AddSelection(c)
 		} else {
-			t.controller.SetSelection(gxui.CreateTextSelection(s, e, false))
+			t.controller.SetSelection(c)
 		}
 	}
 	t.InputEventHandler.DoubleClick(ev)
@@ -422,7 +425,8 @@ func (t *TextBox) MouseMove(ev gxui.MouseEvent) {
 	t.List.MouseMove(ev)
 	if t.selectionDragging {
 		if p, ok := t.RuneIndexAt(ev.Point); ok {
-			t.selectionDrag = gxui.CreateTextSelection(t.selectionDrag.From(), p, false)
+			idx := t.selectionDrag.Index + t.selectionDrag.Length
+			t.selectionDrag = gxui.CreateTextCursor(idx, p)
 			t.selectionDragging = true
 			t.onRedrawLines.Fire()
 		}

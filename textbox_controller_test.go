@@ -6,38 +6,37 @@ package gxui
 
 import (
 	"fmt"
-	test "github.com/google/gxui/testing"
 	"testing"
+
+	test "github.com/google/gxui/testing"
 )
 
 func parseTBC(markup string) *TextBoxController {
 	tbc := CreateTextBoxController()
-	tbc.selections = TextSelectionList{}
+	tbc.selections = TextCursorList{}
 	runes := make([]rune, 0, 32)
-	sel := TextSelection{}
+	from, to := 0, 0
 	for _, c := range markup {
 		i := len(runes)
 		switch c {
 		case '|':
 			tbc.AddCaret(i)
 		case '{':
-			sel.start = i
-			sel.caretAtStart = false
+			from = i
 		case '[':
-			sel.start = i
-			sel.caretAtStart = true
+			to = i
 		case ']':
-			sel.end = i
-			if sel.CaretAtStart() {
-				panic("Carat should be at end")
+			to = i
+			if to < from {
+				panic("Caret should be at end")
 			}
-			tbc.AddSelection(sel)
+			tbc.AddSelection(CreateTextCursor(from, to))
 		case '}':
-			sel.end = i
-			if !sel.CaretAtStart() {
-				panic("Carat should be at start")
+			from = i
+			if to > from {
+				panic("Caret should be at start")
 			}
-			tbc.AddSelection(sel)
+			tbc.AddSelection(CreateTextCursor(from, to))
 		default:
 			runes = append(runes, c)
 		}
@@ -76,16 +75,16 @@ func TestParseTBCSelections(t *testing.T) {
 	test.AssertEquals(t, "hello\nworld", c.Text())
 	test.AssertEquals(t, 2, c.LineCount())
 	test.AssertEquals(t, 3, c.SelectionCount())
-	test.AssertEquals(t, TextSelection{2, 5, true}, c.Selection(0))
-	test.AssertEquals(t, TextSelection{6, 6, false}, c.Selection(1))
-	test.AssertEquals(t, TextSelection{9, 11, false}, c.Selection(2))
+	test.AssertEquals(t, TextCursor{Index: 2, Length: 3}, c.Selection(0))
+	test.AssertEquals(t, TextCursor{Index: 6, Length: 0}, c.Selection(1))
+	test.AssertEquals(t, TextCursor{Index: 11, Length: -2}, c.Selection(2))
 }
 
 func TestTBCWordAt(t *testing.T) {
 	check := func(str, expected string) {
 		c := parseTBC(str)
 		s, e := c.WordAt(c.FirstCaret())
-		c.SetSelection(TextSelection{s, e, false})
+		c.SetSelection(CreateTextCursor(s, e))
 		assertTBCTextAndSelectionsEqual(t, expected, c)
 	}
 	check("abc.dE|f()", "abc.{dEf]()")
@@ -107,8 +106,8 @@ func TestTBCReplaceAll(t *testing.T) {
 
 func TestTBCReplace(t *testing.T) {
 	c := parseTBC("ħę|ľĺő\n|ŵōř|ŀď")
-	c.Replace(func(s TextSelection) string {
-		return fmt.Sprintf("%d", s.start)
+	c.Replace(func(s TextCursor) string {
+		return fmt.Sprintf("%d", s.Index)
 	})
 	assertTBCTextAndSelectionsEqual(t, "ħę{2]ľĺő\n{6]ŵōř{9]ŀď", c)
 }
